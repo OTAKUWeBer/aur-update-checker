@@ -19,7 +19,6 @@ def configure_logging(level: str) -> None:
     """
     Configure root logger with a simple handler, allowing reconfiguration.
     """
-    # Clear existing handlers if reconfigured
     if LOGGER.hasHandlers():
         LOGGER.handlers.clear()
     numeric_level = getattr(logging, level.upper(), None)
@@ -51,7 +50,7 @@ def fetch_raw_updates(commands: List[str]) -> str:
             LOGGER.warning(f"Command {cmd} failed: {e}")
             last_err = e
     LOGGER.error("No update command succeeded; unable to fetch updates.")
-    raise last_err  # propagate for non-zero exit
+    raise last_err
 
 
 def parse_updates(output: str, verbose: bool) -> List[Tuple[str, Version, Version]]:
@@ -108,7 +107,6 @@ def format_human(updates: List[Dict[str, Any]]) -> None:
     """
     Print a colorized table with extra spacing for readability.
     """
-    # Column widths (add extra padding)
     pkg_w = max(len(u['pkg']) for u in updates) + 4
     old_w = max(len(u['old']) for u in updates) + 4
     new_w = max(len(u['new']) for u in updates) + 4
@@ -199,6 +197,7 @@ def main() -> None:
         LOGGER.error(f"Failed to fetch updates: {e}")
         sys.exit(1)
 
+    # Handle no updates
     if not processed:
         if args.format == 'json':
             print(json.dumps([], indent=2))
@@ -206,11 +205,42 @@ def main() -> None:
             print(Fore.YELLOW + "No updates found or all diffs zero.")
         sys.exit(0)
 
+    # Output results
     if args.format == 'json':
         print(json.dumps(processed, indent=2))
     else:
         format_human(processed)
 
+                # Prompt user to update packages using the best available tool
+        try:
+            choice = input("Do you want to update now? (y/n): ").strip().lower()
+        except KeyboardInterrupt:
+            print("\nUpdate canceled by user.")
+            sys.exit(0)
+
+        if choice == 'y':
+            LOGGER.info("Starting system update using the best helper...")
+            # Try AUR helpers first, then fall back to pacman
+            update_cmds = [
+                ["paru", "-Syu"],
+                ["yay", "-Syu"],
+                ["sudo", "pacman", "-Syu"]
+            ]
+            try:
+                for cmd in update_cmds:
+                    try:
+                        subprocess.run(cmd, check=True)
+                        break
+                    except FileNotFoundError:
+                        LOGGER.warning(f"Update tool not found: {cmd[0]}")
+                    except subprocess.CalledProcessError as e:
+                        LOGGER.error(f"Update failed with {cmd[0]}: {e}")
+                        sys.exit(1)
+            except KeyboardInterrupt:
+                LOGGER.error("Update interrupted by user.")
+                sys.exit(1)
+        else:
+            LOGGER.info("Update skipped by user.")
 
 if __name__ == '__main__':
     main()
